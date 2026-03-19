@@ -7,349 +7,178 @@ const DrawingCanvas = dynamic(() => import('./DrawingCanvas'), { ssr: false })
 
 const SHOT_TYPES = ['ECU','CU','MCU','MS','MWS','WS','EWS','OTS','POV','AERIAL','2-SHOT','INSERT']
 const CAM_MOVES  = ['STATIC','PAN LEFT','PAN RIGHT','TILT UP','TILT DOWN','DOLLY IN','DOLLY OUT','TRACKING','HANDHELD','CRANE UP','CRANE DOWN','ZOOM IN','ZOOM OUT']
-const LENSES     = ['18mm','24mm','28mm','35mm','50mm','85mm','100mm','135mm','200mm','Wide Angle','Telephoto']
+const LENSES     = ['18mm','24mm','28mm','35mm','50mm','85mm','100mm','135mm','200mm']
 
 export default function PanelEditor({ panel, sceneNumber, onSave, onClose }) {
   const [data, setData] = useState({
-    shotType:      panel?.shotType      || 'WS',
-    cameraMove:    panel?.cameraMove    || 'STATIC',
-    lens:          panel?.lens          || '35mm',
-    duration:      panel?.duration      || 3,
-    dialogue:      panel?.dialogue      || '',
-    action:        panel?.action        || '',
-    notes:         panel?.notes         || '',
-    visualMode:    panel?.visualMode    || 'template',
-    templateKey:   panel?.templateKey   || 'WS',
-    canvasData:    panel?.canvasData    || null,
-    imageData:     panel?.imageData     || null,
-    aiPrompt:      panel?.aiPrompt      || '',
-    aiImageUrl:    panel?.aiImageUrl    || null,
+    shotType:    panel?.shotType    || 'WS',
+    cameraMove:  panel?.cameraMove  || 'STATIC',
+    lens:        panel?.lens        || '35mm',
+    duration:    panel?.duration    || 3,
+    dialogue:    panel?.dialogue    || '',
+    action:      panel?.action      || '',
+    notes:       panel?.notes       || '',
+    visualMode:  panel?.visualMode  || 'template',
+    templateKey: panel?.templateKey || 'WS',
+    canvasData:  panel?.canvasData  || null,
+    imageData:   panel?.imageData   || null,
+    aiPrompt:    panel?.aiPrompt    || '',
+    aiImageUrl:  panel?.aiImageUrl  || null,
   })
-
-  const [tab,       setTab]      = useState('info')         // info | visual
-  const [aiLoading, setAiLoading] = useState(false)
-  const [aiError,   setAiError]   = useState('')
+  const [tab,       setTab]      = useState('info')
+  const [aiLoading, setAiLoading]= useState(false)
+  const [aiError,   setAiError]  = useState('')
   const fileRef = useRef()
+  const set = (k,v) => setData(d=>({...d,[k]:v}))
 
-  const set = (key, val) => setData(d => ({ ...d, [key]: val }))
-
-  /* ── AI image generation via Pollinations (free, no key) ── */
   const generateAI = async () => {
-    if (!data.aiPrompt.trim()) return
+    if(!data.aiPrompt.trim()) return
     setAiLoading(true); setAiError('')
     try {
-      const shotLabel = data.shotType.replace(/_/g,' ')
-      const prompt    = encodeURIComponent(
-        `cinematic film still, ${shotLabel} shot, ${data.aiPrompt}, dramatic lighting, film grain, professional cinematography, movie scene`
-      )
-      const url = `https://image.pollinations.ai/prompt/${prompt}?width=640&height=360&nologo=true&seed=${Date.now()}`
-      set('aiImageUrl', url)
-      set('visualMode', 'ai')
-    } catch {
-      setAiError('Generation failed. Try again.')
-    }
+      const prompt = encodeURIComponent(`cinematic film still, ${data.shotType} shot, ${data.aiPrompt}, dramatic lighting, film grain, professional cinematography`)
+      set('aiImageUrl', `https://image.pollinations.ai/prompt/${prompt}?width=640&height=360&nologo=true&seed=${Date.now()}`)
+      set('visualMode','ai')
+    } catch { setAiError('Generation failed. Try again.') }
     setAiLoading(false)
   }
 
-  /* ── Image upload ── */
   const handleUpload = (e) => {
-    const file = e.target.files?.[0]
-    if (!file) return
+    const file = e.target.files?.[0]; if(!file) return
     const reader = new FileReader()
-    reader.onload = () => { set('imageData', reader.result); set('visualMode', 'upload') }
+    reader.onload = () => { set('imageData', reader.result); set('visualMode','upload') }
     reader.readAsDataURL(file)
   }
 
-  /* ── Visual preview (small, in the editor header) ── */
   const VisualPreview = () => (
-    <div className="w-full aspect-video bg-[#111] rounded border border-border overflow-hidden">
-      {data.visualMode === 'template' && (
-        <ShotTemplateSVG templateKey={data.templateKey || data.shotType} />
-      )}
-      {data.visualMode === 'canvas' && data.canvasData && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={data.canvasData} alt="sketch" className="w-full h-full object-contain"/>
-      )}
-      {data.visualMode === 'upload' && data.imageData && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={data.imageData} alt="reference" className="w-full h-full object-cover"/>
-      )}
-      {data.visualMode === 'ai' && data.aiImageUrl && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={data.aiImageUrl} alt="AI generated" className="w-full h-full object-cover"/>
-      )}
-      {!data.visualMode && (
-        <div className="w-full h-full flex items-center justify-center text-text-dim text-xs font-sans">
-          No visual yet
-        </div>
-      )}
+    <div className="w-full aspect-video bg-[#111] rounded border border-[#2a2a2a] overflow-hidden">
+      {data.visualMode==='template' && <ShotTemplateSVG templateKey={data.templateKey||data.shotType}/>}
+      {data.visualMode==='canvas'   && data.canvasData   && <img src={data.canvasData}  alt="sketch" className="w-full h-full object-contain"/>}
+      {data.visualMode==='upload'   && data.imageData    && <img src={data.imageData}   alt="ref"    className="w-full h-full object-cover"/>}
+      {data.visualMode==='ai'       && data.aiImageUrl   && <img src={data.aiImageUrl}  alt="AI"     className="w-full h-full object-cover"/>}
     </div>
   )
 
   return (
     <div className="modal-bg" onClick={onClose}>
-      <div
-        className="bg-surface border border-border2 rounded-xl w-full max-w-4xl max-h-[92vh] overflow-hidden flex flex-col fade-up"
-        onClick={e => e.stopPropagation()}
-      >
+      <div className="bg-[#141414] border border-[#333] rounded-xl w-full max-w-4xl max-h-[92vh] flex flex-col fade-up mx-2 sm:mx-4" onClick={e=>e.stopPropagation()}>
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border flex-shrink-0">
-          <div className="flex items-center gap-3">
-            <span className="font-bebas text-2xl text-accent tracking-widest">Panel Editor</span>
-            <span className="text-sm text-muted font-sans">
-              Scene {sceneNumber} · Shot {panel?.number}
-            </span>
+        <div className="flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 border-b border-[#2a2a2a] flex-shrink-0">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <span className="font-bebas text-xl sm:text-2xl text-[#c9a84c] tracking-widest">Panel Editor</span>
+            <span className="text-xs sm:text-sm text-[#555]">Scene {sceneNumber} · Shot {panel?.number}</span>
           </div>
-          <button onClick={onClose} className="text-muted hover:text-text transition-colors text-xl">✕</button>
+          <button onClick={onClose} className="text-[#555] hover:text-[#d8d6cc] text-xl w-8 h-8 flex items-center justify-center">✕</button>
         </div>
 
         {/* Tabs */}
-        <div className="flex border-b border-border flex-shrink-0">
-          {['info','visual'].map(t => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`px-6 py-3 text-sm font-sans capitalize border-b-2 transition-all ${
-                tab === t
-                  ? 'border-accent text-accent'
-                  : 'border-transparent text-muted hover:text-text'
-              }`}
-            >
-              {t === 'info' ? '📋 Shot Info' : '🎨 Visual'}
+        <div className="flex border-b border-[#2a2a2a] flex-shrink-0">
+          {[{id:'info',l:'📋 Info'},{id:'visual',l:'🎨 Visual'}].map(t=>(
+            <button key={t.id} onClick={()=>setTab(t.id)}
+              className={`flex-1 sm:flex-none px-4 sm:px-6 py-3 text-sm border-b-2 transition-all ${tab===t.id?'border-[#c9a84c] text-[#c9a84c]':'border-transparent text-[#555] hover:text-[#d8d6cc]'}`}>
+              {t.l}
             </button>
           ))}
         </div>
 
-        <div className="overflow-y-auto flex-1 p-6">
-
-          {/* ── INFO TAB ── */}
-          {tab === 'info' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Left: preview + shot type */}
-              <div className="flex flex-col gap-4">
-                <VisualPreview />
-
+        <div className="overflow-y-auto flex-1 p-4 sm:p-6">
+          {/* INFO TAB */}
+          {tab==='info' && (
+            <div className="flex flex-col lg:flex-row gap-5">
+              {/* Left */}
+              <div className="flex flex-col gap-4 lg:w-1/2">
+                <VisualPreview/>
                 <div>
-                  <label className="block text-xs text-muted uppercase tracking-widest mb-2 font-sans">Shot Type</label>
+                  <label className="block text-xs text-[#555] uppercase tracking-widest mb-2">Shot Type</label>
                   <div className="flex flex-wrap gap-1.5">
-                    {SHOT_TYPES.map(s => (
-                      <button
-                        key={s}
-                        onClick={() => { set('shotType', s); if (data.visualMode === 'template') set('templateKey', s) }}
-                        className={`px-2.5 py-1 rounded text-xs font-sans border transition-all ${
-                          data.shotType === s
-                            ? 'bg-accent text-black border-accent font-medium'
-                            : 'border-border2 text-muted hover:border-accent-dim hover:text-text'
-                        }`}
-                      >
+                    {SHOT_TYPES.map(s=>(
+                      <button key={s} onClick={()=>{set('shotType',s);if(data.visualMode==='template')set('templateKey',s)}}
+                        className={`px-2.5 py-1.5 rounded text-xs border transition-all ${data.shotType===s?'bg-[#c9a84c] text-black border-[#c9a84c] font-medium':'border-[#333] text-[#555] hover:text-[#d8d6cc]'}`}>
                         {s}
                       </button>
                     ))}
                   </div>
                 </div>
-
                 <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs text-muted uppercase tracking-widest mb-1.5 font-sans">Camera</label>
-                    <select
-                      value={data.cameraMove}
-                      onChange={e => set('cameraMove', e.target.value)}
-                      className="w-full bg-surface2 border border-border2 text-text text-sm rounded px-2 py-1.5 font-sans outline-none focus:border-accent"
-                    >
-                      {CAM_MOVES.map(m => <option key={m} value={m}>{m}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs text-muted uppercase tracking-widest mb-1.5 font-sans">Lens</label>
-                    <select
-                      value={data.lens}
-                      onChange={e => set('lens', e.target.value)}
-                      className="w-full bg-surface2 border border-border2 text-text text-sm rounded px-2 py-1.5 font-sans outline-none focus:border-accent"
-                    >
-                      {LENSES.map(l => <option key={l} value={l}>{l}</option>)}
-                    </select>
-                  </div>
+                  {[{label:'Camera',field:'cameraMove',opts:CAM_MOVES},{label:'Lens',field:'lens',opts:LENSES}].map(({label,field,opts})=>(
+                    <div key={field}>
+                      <label className="block text-xs text-[#555] uppercase tracking-widest mb-1.5">{label}</label>
+                      <select value={data[field]} onChange={e=>set(field,e.target.value)}
+                        className="w-full bg-[#1c1c1c] border border-[#333] text-[#d8d6cc] text-sm rounded px-2 py-2 outline-none focus:border-[#c9a84c]">
+                        {opts.map(o=><option key={o} value={o}>{o}</option>)}
+                      </select>
+                    </div>
+                  ))}
                 </div>
-
                 <div>
-                  <label className="block text-xs text-muted uppercase tracking-widest mb-1.5 font-sans">
-                    Duration — {data.duration}s
-                  </label>
-                  <input
-                    type="range" min="1" max="60" value={data.duration}
-                    onChange={e => set('duration', Number(e.target.value))}
-                    className="w-full"
-                  />
+                  <label className="block text-xs text-[#555] uppercase tracking-widest mb-1.5">Duration — {data.duration}s</label>
+                  <input type="range" min="1" max="60" value={data.duration} onChange={e=>set('duration',Number(e.target.value))} className="w-full"/>
                 </div>
               </div>
-
-              {/* Right: text fields */}
-              <div className="flex flex-col gap-4">
-                <div>
-                  <label className="block text-xs text-muted uppercase tracking-widest mb-1.5 font-sans">Action</label>
-                  <textarea
-                    value={data.action}
-                    onChange={e => set('action', e.target.value)}
-                    placeholder="What happens in this shot…"
-                    rows={3}
-                    className="w-full bg-surface2 border border-border2 text-text text-sm rounded px-3 py-2 font-courier outline-none focus:border-accent resize-none transition-colors"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs text-muted uppercase tracking-widest mb-1.5 font-sans">Dialogue</label>
-                  <textarea
-                    value={data.dialogue}
-                    onChange={e => set('dialogue', e.target.value)}
-                    placeholder="What is said in this shot…"
-                    rows={3}
-                    className="w-full bg-surface2 border border-border2 text-text text-sm rounded px-3 py-2 font-courier outline-none focus:border-accent resize-none transition-colors"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs text-muted uppercase tracking-widest mb-1.5 font-sans">Notes</label>
-                  <textarea
-                    value={data.notes}
-                    onChange={e => set('notes', e.target.value)}
-                    placeholder="Technical notes, lighting, props…"
-                    rows={3}
-                    className="w-full bg-surface2 border border-border2 text-text text-sm rounded px-3 py-2 font-courier outline-none focus:border-accent resize-none transition-colors"
-                  />
-                </div>
-
-                {/* Duration summary */}
-                <div className="bg-surface2 border border-border rounded p-3 text-xs font-sans text-muted">
-                  <span className="text-accent font-medium">{data.shotType}</span>
-                  {' · '}
-                  <span>{data.cameraMove}</span>
-                  {' · '}
-                  <span>{data.lens}</span>
-                  {' · '}
-                  <span>{data.duration}s</span>
-                </div>
+              {/* Right */}
+              <div className="flex flex-col gap-4 lg:w-1/2">
+                {[{l:'Action',f:'action',p:'What happens in this shot…'},{l:'Dialogue',f:'dialogue',p:'What is said…'},{l:'Notes',f:'notes',p:'Technical notes, lighting, props…'}].map(({l,f,p})=>(
+                  <div key={f}>
+                    <label className="block text-xs text-[#555] uppercase tracking-widest mb-1.5">{l}</label>
+                    <textarea value={data[f]} onChange={e=>set(f,e.target.value)} placeholder={p} rows={3}
+                      className="w-full bg-[#1c1c1c] border border-[#333] text-[#d8d6cc] text-sm rounded px-3 py-2 font-courier outline-none focus:border-[#c9a84c] resize-none"/>
+                  </div>
+                ))}
               </div>
             </div>
           )}
 
-          {/* ── VISUAL TAB ── */}
-          {tab === 'visual' && (
-            <div className="flex flex-col gap-6">
-              {/* Mode selector */}
-              <div className="flex gap-2">
-                {[
-                  { id: 'template', label: '📐 Templates' },
-                  { id: 'canvas',   label: '✏️ Draw' },
-                  { id: 'upload',   label: '📷 Upload' },
-                  { id: 'ai',       label: '🤖 AI Generate' },
-                ].map(m => (
-                  <button
-                    key={m.id}
-                    onClick={() => set('visualMode', m.id)}
-                    className={`flex-1 py-2 text-sm font-sans rounded border transition-all ${
-                      data.visualMode === m.id
-                        ? 'bg-accent text-black border-accent font-medium'
-                        : 'border-border2 text-muted hover:border-accent-dim hover:text-text'
-                    }`}
-                  >
-                    {m.label}
+          {/* VISUAL TAB */}
+          {tab==='visual' && (
+            <div className="flex flex-col gap-5">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {[{id:'template',l:'📐 Templates'},{id:'canvas',l:'✏️ Draw'},{id:'upload',l:'📷 Upload'},{id:'ai',l:'🤖 AI'}].map(m=>(
+                  <button key={m.id} onClick={()=>set('visualMode',m.id)}
+                    className={`py-2.5 text-sm rounded border transition-all ${data.visualMode===m.id?'bg-[#c9a84c] text-black border-[#c9a84c] font-medium':'border-[#333] text-[#555] hover:text-[#d8d6cc]'}`}>
+                    {m.l}
                   </button>
                 ))}
               </div>
 
-              {/* Template grid */}
-              {data.visualMode === 'template' && (
-                <div>
-                  <p className="text-xs text-muted font-sans mb-3">Pick a shot composition template</p>
-                  <ShotTemplateGrid
-                    selected={data.templateKey}
-                    onSelect={key => { set('templateKey', key); set('shotType', key) }}
-                  />
-                </div>
+              {data.visualMode==='template' && (
+                <ShotTemplateGrid selected={data.templateKey} onSelect={k=>{set('templateKey',k);set('shotType',k)}}/>
               )}
 
-              {/* Drawing canvas */}
-              {data.visualMode === 'canvas' && (
-                <DrawingCanvas
-                  width={640} height={360}
-                  initialData={data.canvasData}
-                  onChange={d => set('canvasData', d)}
-                />
+              {data.visualMode==='canvas' && (
+                <DrawingCanvas width={640} height={360} initialData={data.canvasData} onChange={d=>set('canvasData',d)}/>
               )}
 
-              {/* Upload */}
-              {data.visualMode === 'upload' && (
+              {data.visualMode==='upload' && (
                 <div>
-                  {data.imageData ? (
-                    <div className="flex flex-col gap-2">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={data.imageData} alt="uploaded" className="w-full rounded border border-border object-contain max-h-64"/>
-                      <button
-                        onClick={() => fileRef.current?.click()}
-                        className="text-xs text-muted hover:text-text font-sans transition-colors"
-                      >
-                        Replace image
-                      </button>
-                    </div>
-                  ) : (
-                    <div
-                      onClick={() => fileRef.current?.click()}
-                      className="border-2 border-dashed border-border2 rounded-lg p-12 text-center cursor-pointer hover:border-accent-dim transition-colors"
-                    >
-                      <div className="text-4xl mb-3">📷</div>
-                      <p className="text-sm font-sans text-muted">Click to upload a reference image</p>
-                      <p className="text-xs font-sans text-text-dim mt-1">PNG, JPG, GIF — any size</p>
-                    </div>
-                  )}
+                  {data.imageData
+                    ? <div className="flex flex-col gap-2">
+                        <img src={data.imageData} alt="uploaded" className="w-full rounded border border-[#2a2a2a] object-contain max-h-64"/>
+                        <button onClick={()=>fileRef.current?.click()} className="text-xs text-[#555] hover:text-[#d8d6cc]">Replace image</button>
+                      </div>
+                    : <div onClick={()=>fileRef.current?.click()} className="border-2 border-dashed border-[#333] rounded-lg p-12 text-center cursor-pointer hover:border-[#7a6030]">
+                        <div className="text-4xl mb-3">📷</div>
+                        <p className="text-sm text-[#555]">Tap to upload a reference image</p>
+                      </div>
+                  }
                   <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleUpload}/>
                 </div>
               )}
 
-              {/* AI generation */}
-              {data.visualMode === 'ai' && (
+              {data.visualMode==='ai' && (
                 <div className="flex flex-col gap-4">
                   <div>
-                    <label className="block text-xs text-muted uppercase tracking-widest mb-1.5 font-sans">
-                      Describe the shot
-                    </label>
-                    <textarea
-                      value={data.aiPrompt}
-                      onChange={e => set('aiPrompt', e.target.value)}
-                      placeholder="e.g. detective staring out a rain-covered window at night, neon reflections, noir atmosphere"
-                      rows={3}
-                      className="w-full bg-surface2 border border-border2 text-text text-sm rounded px-3 py-2 font-courier outline-none focus:border-accent resize-none transition-colors"
-                    />
-                    <p className="text-xs text-muted font-sans mt-1">
-                      Shot type <span className="text-accent">{data.shotType}</span> will be added automatically
-                    </p>
+                    <label className="block text-xs text-[#555] uppercase tracking-widest mb-1.5">Describe the shot</label>
+                    <textarea value={data.aiPrompt} onChange={e=>set('aiPrompt',e.target.value)} rows={3}
+                      placeholder="detective staring out a rain-covered window at night, neon reflections, noir atmosphere"
+                      className="w-full bg-[#1c1c1c] border border-[#333] text-[#d8d6cc] text-sm rounded px-3 py-2 font-courier outline-none focus:border-[#c9a84c] resize-none"/>
+                    <p className="text-xs text-[#555] mt-1">Shot type <span className="text-[#c9a84c]">{data.shotType}</span> added automatically</p>
                   </div>
-
-                  <button
-                    onClick={generateAI}
-                    disabled={!data.aiPrompt.trim() || aiLoading}
-                    className="px-4 py-2 bg-accent text-black text-sm font-sans font-medium rounded hover:opacity-85 transition-opacity disabled:opacity-40 self-start"
-                  >
-                    {aiLoading ? 'Generating…' : '🤖 Generate Image'}
+                  <button onClick={generateAI} disabled={!data.aiPrompt.trim()||aiLoading}
+                    className="px-4 py-2.5 bg-[#c9a84c] text-black text-sm font-medium rounded hover:opacity-85 disabled:opacity-40 self-start">
+                    {aiLoading?'Generating…':'🤖 Generate Image'}
                   </button>
-
-                  {aiError && <p className="text-red text-xs font-sans">{aiError}</p>}
-
-                  {data.aiImageUrl && (
-                    <div>
-                      <p className="text-xs text-muted font-sans mb-2">Generated result:</p>
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={data.aiImageUrl}
-                        alt="AI generated shot"
-                        className="w-full rounded border border-border object-cover max-h-64"
-                        onError={() => setAiError('Image failed to load. Try a different prompt.')}
-                      />
-                    </div>
-                  )}
-
-                  <div className="bg-surface2 border border-border rounded p-3 text-xs font-sans text-muted">
-                    🆓 Powered by Pollinations.ai — free, no API key needed
-                  </div>
+                  {aiError && <p className="text-[#c85050] text-xs">{aiError}</p>}
+                  {data.aiImageUrl && <img src={data.aiImageUrl} alt="AI generated" className="w-full rounded border border-[#2a2a2a] object-cover max-h-64" onError={()=>setAiError('Image failed. Try a different prompt.')}/>}
+                  <div className="bg-[#1c1c1c] border border-[#2a2a2a] rounded p-3 text-xs text-[#555]">🆓 Powered by Pollinations.ai — free, no API key</div>
                 </div>
               )}
             </div>
@@ -357,14 +186,9 @@ export default function PanelEditor({ panel, sceneNumber, onSave, onClose }) {
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between px-6 py-4 border-t border-border flex-shrink-0">
-          <button onClick={onClose} className="px-4 py-2 text-sm font-sans text-muted hover:text-text transition-colors">
-            Cancel
-          </button>
-          <button
-            onClick={() => onSave(data)}
-            className="px-6 py-2 bg-accent text-black text-sm font-sans font-medium rounded hover:opacity-85 transition-opacity"
-          >
+        <div className="flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-[#2a2a2a] flex-shrink-0">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-[#555] hover:text-[#d8d6cc]">Cancel</button>
+          <button onClick={()=>onSave(data)} className="px-5 sm:px-6 py-2 bg-[#c9a84c] text-black text-sm font-medium rounded hover:opacity-85 active:scale-95">
             Save Panel
           </button>
         </div>

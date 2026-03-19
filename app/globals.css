@@ -3,12 +3,8 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --accent: #c9a84c;
-}
-
+:root { --accent: #c9a84c; }
 * { box-sizing: border-box; }
-
 body {
   background: #0a0a0a;
   color: #d8d6cc;
@@ -21,11 +17,9 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 2px; }
 ::-webkit-scrollbar-thumb:hover { background: #7a6030; }
-
-/* Selection */
 ::selection { background: rgba(201,168,76,.25); }
 
-/* Panel frame — film gate aesthetic */
+/* Panel frame */
 .panel-frame {
   position: relative;
   background: #111;
@@ -36,12 +30,8 @@ body {
   cursor: pointer;
   transition: border-color .15s, transform .1s;
 }
-.panel-frame:hover {
-  border-color: #c9a84c;
-  transform: translateY(-1px);
-}
-.panel-frame::before,
-.panel-frame::after {
+.panel-frame:hover { border-color: #c9a84c; transform: translateY(-1px); }
+.panel-frame::before, .panel-frame::after {
   content: '';
   position: absolute;
   top: 0; bottom: 0;
@@ -53,14 +43,12 @@ body {
 .panel-frame::before { left: 0; }
 .panel-frame::after  { right: 0; }
 
-/* Fade-in animation */
 @keyframes fadeUp {
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: none; }
 }
 .fade-up { animation: fadeUp .2s ease both; }
 
-/* Modal backdrop */
 .modal-bg {
   position: fixed; inset: 0;
   background: rgba(0,0,0,.75);
@@ -71,6 +59,117 @@ body {
   justify-content: center;
 }
 
-/* Canvas cursor */
 .canvas-pencil { cursor: crosshair; }
 .canvas-eraser { cursor: cell; }
+
+/* ═══════════════════════════════
+   MOBILE  ≤ 768px
+═══════════════════════════════ */
+@media (max-width: 768px) {
+  /* Modal slides up from bottom */
+  .modal-bg { align-items: flex-end; }
+  .modal-bg > div {
+    border-radius: 16px 16px 0 0 !important;
+    max-height: 92vh;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+  }
+
+  /* Panel frame: no decorative side strips on mobile */
+  .panel-frame::before, .panel-frame::after { display: none; }
+
+  /* Bigger tap targets for all buttons */
+  button { min-height: 36px; }
+}
+
+/* ═══════════════════════════════
+   PRINT STYLES — controlled by body class
+═══════════════════════════════ */
+@media print {
+  @page { size: A4; margin: 15mm; }
+
+  /* Hide everything by default */
+  body > * { display: none !important; }
+
+  /* Only show the dedicated print container */
+  #print-root { display: block !important; }
+
+  #print-root { font-family: 'Inter', sans-serif; color: #000; }
+
+  /* Storyboard print grid */
+  .print-storyboard .print-panel-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8mm;
+    page-break-inside: auto;
+  }
+  .print-storyboard .print-panel {
+    page-break-inside: avoid;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .print-storyboard .print-panel-img {
+    width: 100%;
+    aspect-ratio: 16/9;
+    background: #f0f0f0;
+    overflow: hidden;
+  }
+  .print-storyboard .print-panel-meta {
+    padding: 3mm 3mm 2mm;
+    font-size: 8pt;
+    border-top: 1px solid #eee;
+  }
+  .print-storyboard .print-scene-title {
+    font-size: 10pt;
+    font-weight: 700;
+    text-transform: uppercase;
+    margin: 6mm 0 3mm;
+    padding-bottom: 1mm;
+    border-bottom: 1px solid #000;
+  }
+
+  /* Shot list print */
+  .print-shotlist table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 8pt;
+  }
+  .print-shotlist th {
+    background: #f0f0f0;
+    border: 1px solid #ccc;
+    padding: 2mm 3mm;
+    text-align: left;
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 7pt;
+  }
+  .print-shotlist td {
+    border: 1px solid #ddd;
+    padding: 2mm 3mm;
+    vertical-align: top;
+  }
+  .print-shotlist tr:nth-child(even) td { background: #fafafa; }
+
+  /* Call sheet print */
+  .print-callsheet .cs-header {
+    text-align: center;
+    margin-bottom: 8mm;
+    padding-bottom: 4mm;
+    border-bottom: 2px solid #000;
+  }
+  .print-callsheet .cs-header h1 { font-size: 18pt; font-weight: 700; }
+  .print-callsheet .cs-header p  { font-size: 10pt; color: #555; }
+  .print-callsheet .cs-section    { margin-bottom: 8mm; }
+  .print-callsheet .cs-section h2 {
+    font-size: 11pt; font-weight: 700;
+    text-transform: uppercase;
+    border-bottom: 1px solid #000;
+    padding-bottom: 1mm; margin-bottom: 3mm;
+  }
+  .print-callsheet table { width: 100%; border-collapse: collapse; font-size: 9pt; }
+  .print-callsheet th { background: #f0f0f0; border: 1px solid #ccc; padding: 2mm 3mm; font-weight: 600; text-align: left; }
+  .print-callsheet td { border: 1px solid #ddd; padding: 2mm 3mm; }
+  .print-callsheet .cs-notes { font-size: 9pt; white-space: pre-wrap; }
+}

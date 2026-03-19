@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { v4 as uuid } from 'uuid'
 import dynamic from 'next/dynamic'
@@ -7,12 +7,133 @@ import { ShotTemplateSVG } from '../../components/ShotTemplates'
 
 const PanelEditor = dynamic(() => import('../../components/PanelEditor'), { ssr: false })
 
-/* ─── helpers ─── */
-function loadProjects() {
-  try { return JSON.parse(localStorage.getItem('openframe_projects') || '[]') } catch { return [] }
+/* ─── storage ─── */
+function loadProjects() { try { return JSON.parse(localStorage.getItem('openframe_projects')||'[]') } catch { return [] } }
+function saveProjects(list) { localStorage.setItem('openframe_projects', JSON.stringify(list)) }
+
+/* ─── export helpers ─── */
+function exportJSON(project) {
+  const blob = new Blob([JSON.stringify(project, null, 2)], { type: 'application/json' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = `${project.title.replace(/\s+/g,'_')}_openframe.json`
+  a.click()
 }
-function saveProjects(list) {
-  localStorage.setItem('openframe_projects', JSON.stringify(list))
+
+function printMode(cls, title, project) {
+  // Build the print-root content based on mode
+  let html = ''
+  if (cls === 'print-storyboard') {
+    html = buildStoryboardPrint(project)
+  } else if (cls === 'print-shotlist') {
+    html = buildShotListPrint(project)
+  } else if (cls === 'print-callsheet') {
+    html = buildCallSheetPrint(project)
+  }
+
+  // Write into print-root, print, then clean up
+  let root = document.getElementById('print-root')
+  if (!root) {
+    root = document.createElement('div')
+    root.id = 'print-root'
+    document.body.appendChild(root)
+  }
+  root.className = cls
+  root.innerHTML = html
+  document.body.dataset.printing = cls
+  window.print()
+  document.body.dataset.printing = ''
+  root.innerHTML = ''
+}
+
+function buildStoryboardPrint(project) {
+  const scenes = project.scenes || []
+  if (!scenes.length) return '<p>No scenes yet.</p>'
+  let html = `<h1 style="font-family:sans-serif;font-size:16pt;font-weight:700;margin-bottom:4mm">${project.title}</h1>`
+  scenes.forEach(scene => {
+    html += `<div class="print-scene-title">${scene.number}. ${scene.name}</div>`
+    html += `<div class="print-panel-grid">`
+    scene.shots.forEach(shot => {
+      const visual = shot.visualMode === 'upload' ? shot.imageData
+        : shot.visualMode === 'canvas'  ? shot.canvasData
+        : shot.visualMode === 'ai'      ? shot.aiImageUrl
+        : null
+      html += `<div class="print-panel">
+        <div class="print-panel-img" style="display:flex;align-items:center;justify-content:center;background:#eee">
+          ${visual ? `<img src="${visual}" style="width:100%;height:100%;object-fit:cover"/>` : `<span style="font-size:8pt;color:#999">${shot.shotType||'—'}</span>`}
+        </div>
+        <div class="print-panel-meta">
+          <strong>${scene.number}.${shot.number} · ${shot.shotType||''}</strong>
+          ${shot.cameraMove && shot.cameraMove!=='STATIC'?` · ${shot.cameraMove}`:''}
+          ${shot.lens?` · ${shot.lens}`:''}
+          ${shot.duration?` · ${shot.duration}s`:''}
+          ${shot.action?`<br><em>${shot.action.slice(0,80)}${shot.action.length>80?'…':''}</em>`:''}
+        </div>
+      </div>`
+    })
+    html += `</div>`
+  })
+  return html
+}
+
+function buildShotListPrint(project) {
+  const all = (project.scenes||[]).flatMap(s => s.shots.map(sh=>({...sh,sceneName:s.name,sceneNum:s.number})))
+  const total = all.reduce((a,s)=>a+(s.duration||0),0)
+  return `
+    <div class="print-shotlist">
+      <h1 style="font-family:sans-serif;font-size:16pt;font-weight:700;margin-bottom:1mm">${project.title}</h1>
+      <p style="font-family:sans-serif;font-size:9pt;color:#666;margin-bottom:5mm">Shot List · ${all.length} shots · ~${Math.floor(total/60)}m ${total%60}s</p>
+      <table>
+        <thead>
+          <tr>
+            ${['#','Scene','Type','Camera','Lens','Dur.','Action','Dialogue'].map(h=>`<th>${h}</th>`).join('')}
+          </tr>
+        </thead>
+        <tbody>
+          ${all.map(s=>`
+            <tr>
+              <td>${s.sceneNum}.${s.number}</td>
+              <td>${s.sceneName||''}</td>
+              <td><strong>${s.shotType||''}</strong></td>
+              <td>${s.cameraMove||''}</td>
+              <td>${s.lens||''}</td>
+              <td>${s.duration||''}s</td>
+              <td>${s.action||'—'}</td>
+              <td>${s.dialogue||'—'}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`
+}
+
+function buildCallSheetPrint(project) {
+  const cs = project.callsheet || {}
+  const dates = cs.shootDates || []
+  const crew  = cs.crew || []
+  return `
+    <div class="print-callsheet">
+      <div class="cs-header">
+        <h1>${project.title}</h1>
+        <p>Call Sheet · OpenFrame by OpenSlate</p>
+      </div>
+      ${dates.length ? `
+      <div class="cs-section">
+        <h2>Shoot Schedule</h2>
+        <table>
+          <thead><tr>${['Date','Call Time','Location','Scenes','Notes'].map(h=>`<th>${h}</th>`).join('')}</tr></thead>
+          <tbody>${dates.map(d=>`<tr><td>${d.date||''}</td><td>${d.callTime||''}</td><td>${d.location||''}</td><td>${d.scenes||''}</td><td>${d.notes||''}</td></tr>`).join('')}</tbody>
+        </table>
+      </div>` : ''}
+      ${crew.length ? `
+      <div class="cs-section">
+        <h2>Crew</h2>
+        <table>
+          <thead><tr>${['Name','Role','Phone','Call Time'].map(h=>`<th>${h}</th>`).join('')}</tr></thead>
+          <tbody>${crew.map(c=>`<tr><td>${c.name||''}</td><td>${c.role||''}</td><td>${c.phone||''}</td><td>${c.callTime||''}</td></tr>`).join('')}</tbody>
+        </table>
+      </div>` : ''}
+      ${cs.notes ? `<div class="cs-section"><h2>Production Notes</h2><p class="cs-notes">${cs.notes}</p></div>` : ''}
+    </div>`
 }
 
 /* ─── Panel thumbnail ─── */
@@ -20,245 +141,174 @@ function PanelThumb({ shot, sceneNum, onClick }) {
   return (
     <div className="flex flex-col gap-1.5 cursor-pointer group" onClick={onClick}>
       <div className="panel-frame">
-        {/* Visual */}
-        {shot.visualMode === 'template' && <ShotTemplateSVG templateKey={shot.templateKey || shot.shotType}/>}
-        {shot.visualMode === 'canvas'   && shot.canvasData   && <img src={shot.canvasData}  alt="sketch"    className="w-full h-full object-contain"/>}
-        {shot.visualMode === 'upload'   && shot.imageData    && <img src={shot.imageData}   alt="reference" className="w-full h-full object-cover"/>}
-        {shot.visualMode === 'ai'       && shot.aiImageUrl   && <img src={shot.aiImageUrl}  alt="AI"        className="w-full h-full object-cover"/>}
-        {(!shot.visualMode) && (
-          <div className="w-full h-full flex items-center justify-center bg-surface2 text-2xl">+</div>
-        )}
-
-        {/* Shot badge */}
-        <div className="absolute top-0 left-0 right-0 bg-gradient-to-b from-black/60 to-transparent px-3 pt-1.5 pb-3 z-10">
-          <span className="text-[9px] font-sans font-medium text-white/80">
-            {sceneNum}.{shot.number} · {shot.shotType}
-          </span>
+        {shot.visualMode==='template' && <ShotTemplateSVG templateKey={shot.templateKey||shot.shotType}/>}
+        {shot.visualMode==='canvas'   && shot.canvasData  && <img src={shot.canvasData}  alt="sketch" className="w-full h-full object-contain"/>}
+        {shot.visualMode==='upload'   && shot.imageData   && <img src={shot.imageData}   alt="ref"    className="w-full h-full object-cover"/>}
+        {shot.visualMode==='ai'       && shot.aiImageUrl  && <img src={shot.aiImageUrl}  alt="AI"     className="w-full h-full object-cover"/>}
+        {!shot.visualMode && <div className="w-full h-full flex items-center justify-center bg-[#1c1c1c] text-2xl text-[#333]">+</div>}
+        <div className="absolute top-0 left-0 right-0 bg-gradient-to-b from-black/60 to-transparent px-2 pt-1.5 pb-3 z-10">
+          <span className="text-[9px] text-white/80">{sceneNum}.{shot.number} · {shot.shotType}</span>
         </div>
-
-        {/* Camera move badge */}
-        {shot.cameraMove && shot.cameraMove !== 'STATIC' && (
-          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent px-3 pb-1.5 pt-3 z-10">
-            <span className="text-[9px] font-sans text-accent/90">{shot.cameraMove}</span>
+        {shot.cameraMove && shot.cameraMove!=='STATIC' && (
+          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent px-2 pb-1.5 pt-3 z-10">
+            <span className="text-[9px] text-[#c9a84c]/90">{shot.cameraMove}</span>
           </div>
         )}
       </div>
-
-      {/* Caption */}
       <div className="px-0.5">
-        <p className="text-[10px] font-sans text-text truncate">{shot.action || 'No action description'}</p>
-        {shot.duration && (
-          <span className="text-[9px] text-muted font-sans">{shot.duration}s · {shot.lens}</span>
-        )}
+        <p className="text-[10px] text-[#d8d6cc] truncate">{shot.action||'No description'}</p>
+        <span className="text-[9px] text-[#555]">{shot.duration}s · {shot.lens}</span>
       </div>
     </div>
   )
 }
 
-/* ─── Storyboard tab ─── */
+/* ─── Storyboard ─── */
 function StoryboardTab({ project, updateProject }) {
-  const [editingPanel, setEditingPanel] = useState(null) // { scene, shot }
+  const [editingPanel, setEditingPanel] = useState(null)
   const [addingScene,  setAddingScene]  = useState(false)
   const [sceneName,    setSceneName]    = useState('')
 
   const addScene = () => {
-    if (!sceneName.trim()) return
-    const scene = { id: uuid(), number: project.scenes.length + 1, name: sceneName.trim(), shots: [] }
-    updateProject({ scenes: [...project.scenes, scene] })
+    if(!sceneName.trim()) return
+    const scene = { id:uuid(), number:project.scenes.length+1, name:sceneName.trim(), shots:[] }
+    updateProject({ scenes:[...project.scenes, scene] })
     setSceneName(''); setAddingScene(false)
   }
 
   const addShot = (sceneId) => {
     const scenes = project.scenes.map(s => {
-      if (s.id !== sceneId) return s
-      const shot = {
-        id: uuid(), number: s.shots.length + 1,
-        shotType: 'WS', cameraMove: 'STATIC', lens: '35mm', duration: 3,
-        dialogue: '', action: '', notes: '',
-        visualMode: 'template', templateKey: 'WS',
-        canvasData: null, imageData: null, aiPrompt: '', aiImageUrl: null,
-      }
-      return { ...s, shots: [...s.shots, shot] }
+      if(s.id!==sceneId) return s
+      const shot = { id:uuid(), number:s.shots.length+1, shotType:'WS', cameraMove:'STATIC', lens:'35mm', duration:3,
+        dialogue:'', action:'', notes:'', visualMode:'template', templateKey:'WS', canvasData:null, imageData:null, aiPrompt:'', aiImageUrl:null }
+      return { ...s, shots:[...s.shots, shot] }
     })
     updateProject({ scenes })
   }
 
   const deleteScene = (sceneId) => {
-    if (!confirm('Delete this scene and all its shots?')) return
-    updateProject({ scenes: project.scenes.filter(s => s.id !== sceneId) })
+    if(!confirm('Delete this scene?')) return
+    updateProject({ scenes:project.scenes.filter(s=>s.id!==sceneId) })
   }
 
   const deleteShot = (sceneId, shotId) => {
-    const scenes = project.scenes.map(s => {
-      if (s.id !== sceneId) return s
-      return { ...s, shots: s.shots.filter(sh => sh.id !== shotId) }
-    })
-    updateProject({ scenes })
+    updateProject({ scenes:project.scenes.map(s => s.id!==sceneId ? s : { ...s, shots:s.shots.filter(sh=>sh.id!==shotId) }) })
   }
 
   const savePanel = (sceneId, shotId, data) => {
-    const scenes = project.scenes.map(s => {
-      if (s.id !== sceneId) return s
-      return { ...s, shots: s.shots.map(sh => sh.id === shotId ? { ...sh, ...data } : sh) }
-    })
-    updateProject({ scenes })
+    updateProject({ scenes:project.scenes.map(s => s.id!==sceneId ? s : { ...s, shots:s.shots.map(sh=>sh.id===shotId?{...sh,...data}:sh) }) })
     setEditingPanel(null)
   }
 
+  const totalShots = project.scenes.reduce((a,s)=>a+s.shots.length,0)
+  const totalSecs  = project.scenes.reduce((a,s)=>a+s.shots.reduce((b,sh)=>b+(sh.duration||0),0),0)
+
   return (
-    <div className="flex flex-col gap-8">
-      {/* Toolbar */}
+    <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-muted font-sans">
-          {project.scenes.length} scene{project.scenes.length !== 1 ? 's' : ''} ·{' '}
-          {project.scenes.reduce((a, s) => a + s.shots.length, 0)} shots ·{' '}
-          ~{Math.round(project.scenes.reduce((a, s) =>
-            a + s.shots.reduce((b, sh) => b + (sh.duration || 0), 0), 0) / 60)}min estimated
+        <p className="text-sm text-[#555]">
+          {project.scenes.length} scene{project.scenes.length!==1?'s':''} · {totalShots} shots · ~{Math.round(totalSecs/60)}min
         </p>
-        <button
-          onClick={() => setAddingScene(true)}
-          className="flex items-center gap-2 px-4 py-1.5 bg-accent text-black text-sm font-sans font-medium rounded hover:opacity-85 transition-opacity"
-        >
+        <button onClick={()=>setAddingScene(true)}
+          className="flex items-center gap-1.5 px-4 py-2 bg-[#c9a84c] text-black text-sm font-medium rounded hover:opacity-85 active:scale-95">
           + Add Scene
         </button>
       </div>
 
-      {/* Add scene modal */}
       {addingScene && (
-        <div className="modal-bg" onClick={() => setAddingScene(false)}>
-          <div className="bg-surface border border-border2 rounded-xl p-6 w-full max-w-md fade-up" onClick={e => e.stopPropagation()}>
-            <h3 className="font-bebas text-2xl text-accent tracking-widest mb-4">New Scene</h3>
-            <input
-              autoFocus
-              className="w-full bg-surface2 border border-border2 text-text rounded px-3 py-2 mb-4 font-courier text-sm outline-none focus:border-accent transition-colors"
-              placeholder="INT. POLICE STATION - NIGHT"
-              value={sceneName}
-              onChange={e => setSceneName(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && addScene()}
-            />
+        <div className="modal-bg" onClick={()=>setAddingScene(false)}>
+          <div className="bg-[#141414] border border-[#333] rounded-xl p-5 w-full max-w-md fade-up mx-4" onClick={e=>e.stopPropagation()}>
+            <h3 className="font-bebas text-2xl text-[#c9a84c] tracking-widest mb-4">New Scene</h3>
+            <input autoFocus className="w-full bg-[#1c1c1c] border border-[#333] text-[#d8d6cc] rounded px-3 py-2.5 mb-4 font-courier text-sm outline-none focus:border-[#c9a84c]"
+              placeholder="INT. POLICE STATION - NIGHT" value={sceneName} onChange={e=>setSceneName(e.target.value)} onKeyDown={e=>e.key==='Enter'&&addScene()}/>
             <div className="flex gap-2 justify-end">
-              <button onClick={() => setAddingScene(false)} className="px-4 py-2 text-sm text-muted hover:text-text font-sans">Cancel</button>
-              <button onClick={addScene} className="px-4 py-2 bg-accent text-black text-sm font-sans font-medium rounded hover:opacity-85">Add</button>
+              <button onClick={()=>setAddingScene(false)} className="px-4 py-2 text-sm text-[#555] hover:text-[#d8d6cc]">Cancel</button>
+              <button onClick={addScene} className="px-4 py-2 bg-[#c9a84c] text-black text-sm font-medium rounded">Add</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Scenes */}
-      {project.scenes.length === 0 ? (
-        <div className="text-center py-24 text-muted">
+      {project.scenes.length===0 ? (
+        <div className="text-center py-20 text-[#555]">
           <div className="text-5xl mb-4">🎬</div>
-          <p className="font-sans text-sm">No scenes yet. Add your first scene to begin storyboarding.</p>
+          <p className="text-sm">No scenes yet. Add your first scene to begin storyboarding.</p>
         </div>
       ) : (
         project.scenes.map(scene => (
           <div key={scene.id}>
-            {/* Scene header */}
             <div className="flex items-center gap-3 mb-3">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-sans text-muted bg-surface2 border border-border px-2 py-0.5 rounded">
-                  Scene {scene.number}
-                </span>
-                <span className="font-courier text-sm text-text font-bold uppercase">{scene.name}</span>
-              </div>
-              <div className="flex-1 h-px bg-border"/>
-              <span className="text-xs text-muted font-sans">{scene.shots.length} shots</span>
-              <button onClick={() => addShot(scene.id)} className="text-xs text-accent hover:text-text font-sans transition-colors px-2 py-1 border border-accent-dim rounded hover:border-accent">+ Shot</button>
-              <button onClick={() => deleteScene(scene.id)} className="text-xs text-muted hover:text-red font-sans transition-colors">Delete</button>
+              <span className="text-xs text-[#555] bg-[#1c1c1c] border border-[#2a2a2a] px-2 py-0.5 rounded">Scene {scene.number}</span>
+              <span className="font-courier text-sm text-[#d8d6cc] font-bold uppercase truncate flex-1">{scene.name}</span>
+              <span className="text-xs text-[#555] hidden sm:inline">{scene.shots.length} shots</span>
+              <button onClick={()=>addShot(scene.id)} className="text-xs text-[#c9a84c] border border-[#7a6030] rounded px-2 py-1 hover:border-[#c9a84c] whitespace-nowrap">+ Shot</button>
+              <button onClick={()=>deleteScene(scene.id)} className="text-xs text-[#555] hover:text-[#c85050] hidden sm:inline">Delete</button>
             </div>
 
-            {/* Shot grid */}
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 mb-2">
               {scene.shots.map(shot => (
                 <div key={shot.id} className="relative group">
-                  <PanelThumb
-                    shot={shot}
-                    sceneNum={scene.number}
-                    onClick={() => setEditingPanel({ scene, shot })}
-                  />
-                  <button
-                    onClick={() => deleteShot(scene.id, shot.id)}
-                    className="absolute top-1 right-1 w-5 h-5 bg-black/70 text-white text-xs rounded-full opacity-0 group-hover:opacity-100 transition-opacity z-20 flex items-center justify-center hover:bg-red"
-                  >
+                  <PanelThumb shot={shot} sceneNum={scene.number} onClick={()=>setEditingPanel({scene,shot})}/>
+                  <button onClick={()=>deleteShot(scene.id,shot.id)}
+                    className="absolute top-1 right-1 w-5 h-5 bg-black/70 text-white text-xs rounded-full opacity-0 group-hover:opacity-100 transition-opacity z-20 flex items-center justify-center hover:bg-[#c85050]">
                     ×
                   </button>
                 </div>
               ))}
-
-              {/* Add shot button */}
-              <div
-                onClick={() => addShot(scene.id)}
-                className="flex flex-col items-center justify-center border-2 border-dashed border-border2 rounded hover:border-accent-dim transition-colors cursor-pointer aspect-video"
-              >
-                <span className="text-2xl text-muted">+</span>
-                <span className="text-[9px] font-sans text-muted mt-1">Add Shot</span>
+              <div onClick={()=>addShot(scene.id)} className="flex flex-col items-center justify-center border-2 border-dashed border-[#2a2a2a] rounded hover:border-[#7a6030] cursor-pointer aspect-video">
+                <span className="text-2xl text-[#555]">+</span>
+                <span className="text-[9px] text-[#555] mt-1">Add Shot</span>
               </div>
             </div>
           </div>
         ))
       )}
 
-      {/* Panel editor modal */}
       {editingPanel && (
-        <PanelEditor
-          panel={editingPanel.shot}
-          sceneNumber={editingPanel.scene.number}
-          onClose={() => setEditingPanel(null)}
-          onSave={data => savePanel(editingPanel.scene.id, editingPanel.shot.id, data)}
-        />
+        <PanelEditor panel={editingPanel.shot} sceneNumber={editingPanel.scene.number}
+          onClose={()=>setEditingPanel(null)}
+          onSave={data=>savePanel(editingPanel.scene.id,editingPanel.shot.id,data)}/>
       )}
     </div>
   )
 }
 
-/* ─── Shot List tab ─── */
-function ShotListTab({ project }) {
-  const allShots = project.scenes.flatMap(scene =>
-    scene.shots.map(shot => ({ ...shot, sceneName: scene.name, sceneNum: scene.number }))
-  )
-
-  const totalDuration = allShots.reduce((a, s) => a + (s.duration || 0), 0)
-
+/* ─── Shot List ─── */
+function ShotListTab({ project, onPrint }) {
+  const all = (project.scenes||[]).flatMap(s=>s.shots.map(sh=>({...sh,sceneName:s.name,sceneNum:s.number})))
+  const total = all.reduce((a,s)=>a+(s.duration||0),0)
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
-        <p className="text-sm text-muted font-sans">
-          {allShots.length} shots · ~{Math.floor(totalDuration / 60)}m {totalDuration % 60}s estimated
-        </p>
-        <button
-          onClick={() => window.print()}
-          className="px-4 py-1.5 text-sm font-sans border border-border2 text-muted rounded hover:text-text hover:border-accent transition-all"
-        >
-          🖨 Print Shot List
+      <div className="flex items-center justify-between mb-4 gap-3">
+        <p className="text-sm text-[#555]">{all.length} shots · ~{Math.floor(total/60)}m {total%60}s</p>
+        <button onClick={onPrint} className="px-4 py-2 text-sm border border-[#333] text-[#555] rounded hover:text-[#d8d6cc] hover:border-[#c9a84c] whitespace-nowrap">
+          🖨 Print / PDF
         </button>
       </div>
-
-      <div className="border border-border rounded-lg overflow-hidden">
-        <table className="w-full text-sm font-sans">
+      <div className="border border-[#2a2a2a] rounded-lg overflow-x-auto">
+        <table className="w-full text-sm min-w-[600px]">
           <thead>
-            <tr className="bg-surface2 border-b border-border">
-              {['#','Scene','Shot Type','Camera','Lens','Duration','Action','Dialogue'].map(h => (
-                <th key={h} className="text-left px-3 py-2.5 text-xs text-muted uppercase tracking-wider font-medium">{h}</th>
+            <tr className="bg-[#1c1c1c] border-b border-[#2a2a2a]">
+              {['#','Scene','Type','Camera','Lens','Dur.','Action','Dialogue'].map(h=>(
+                <th key={h} className="text-left px-3 py-2.5 text-xs text-[#555] uppercase tracking-wider">{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {allShots.length === 0 ? (
-              <tr><td colSpan={8} className="px-3 py-8 text-center text-muted text-xs">No shots yet. Add scenes and shots in the Storyboard tab.</td></tr>
-            ) : (
-              allShots.map((shot, i) => (
-                <tr key={shot.id} className={`border-b border-border ${i % 2 === 0 ? 'bg-bg' : 'bg-surface'}`}>
-                  <td className="px-3 py-2.5 text-muted text-xs">{shot.sceneNum}.{shot.number}</td>
-                  <td className="px-3 py-2.5 text-text-dim text-xs max-w-[120px] truncate">{shot.sceneName}</td>
-                  <td className="px-3 py-2.5"><span className="text-accent text-xs font-medium">{shot.shotType}</span></td>
-                  <td className="px-3 py-2.5 text-text-dim text-xs">{shot.cameraMove}</td>
-                  <td className="px-3 py-2.5 text-text-dim text-xs">{shot.lens}</td>
-                  <td className="px-3 py-2.5 text-text-dim text-xs">{shot.duration}s</td>
-                  <td className="px-3 py-2.5 text-text text-xs max-w-[200px] truncate">{shot.action || '—'}</td>
-                  <td className="px-3 py-2.5 text-text-dim text-xs max-w-[200px] truncate font-courier">{shot.dialogue || '—'}</td>
-                </tr>
-              ))
-            )}
+            {all.length===0 ? (
+              <tr><td colSpan={8} className="px-3 py-8 text-center text-[#555] text-xs">No shots yet.</td></tr>
+            ) : all.map((s,i)=>(
+              <tr key={s.id} className={`border-b border-[#2a2a2a] ${i%2===0?'bg-[#0a0a0a]':'bg-[#141414]'}`}>
+                <td className="px-3 py-2 text-[#555] text-xs">{s.sceneNum}.{s.number}</td>
+                <td className="px-3 py-2 text-[#555] text-xs max-w-[100px] truncate">{s.sceneName}</td>
+                <td className="px-3 py-2"><span className="text-[#c9a84c] text-xs font-medium">{s.shotType}</span></td>
+                <td className="px-3 py-2 text-[#555] text-xs">{s.cameraMove}</td>
+                <td className="px-3 py-2 text-[#555] text-xs">{s.lens}</td>
+                <td className="px-3 py-2 text-[#555] text-xs">{s.duration}s</td>
+                <td className="px-3 py-2 text-[#d8d6cc] text-xs max-w-[160px] truncate">{s.action||'—'}</td>
+                <td className="px-3 py-2 text-[#555] text-xs max-w-[160px] truncate font-courier">{s.dialogue||'—'}</td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
@@ -266,77 +316,58 @@ function ShotListTab({ project }) {
   )
 }
 
-/* ─── Characters tab ─── */
+/* ─── Characters ─── */
 function CharactersTab({ project, updateProject }) {
-  const [editing, setEditing] = useState(null)
-  const [form,    setForm]    = useState({})
+  const [editing,setEditing]=useState(null)
+  const [form,setForm]=useState({})
 
-  const openNew  = () => { setForm({ name:'', actor:'', description:'', notes:'' }); setEditing('new') }
-  const openEdit = (c) => { setForm(c); setEditing(c.id) }
-
-  const save = () => {
-    if (!form.name?.trim()) return
-    const chars = editing === 'new'
-      ? [...project.characters, { id: uuid(), ...form }]
-      : project.characters.map(c => c.id === editing ? { ...c, ...form } : c)
-    updateProject({ characters: chars })
-    setEditing(null)
-  }
-
-  const del = (id) => {
-    if (!confirm('Delete this character?')) return
-    updateProject({ characters: project.characters.filter(c => c.id !== id) })
-  }
-
-  const F = ({ label, field, ph, rows }) => (
-    <div>
-      <label className="block text-xs text-muted uppercase tracking-widest mb-1.5 font-sans">{label}</label>
-      {rows ? (
-        <textarea rows={rows} value={form[field] || ''} onChange={e => setForm(f => ({...f,[field]:e.target.value}))}
-          placeholder={ph} className="w-full bg-surface2 border border-border2 text-text text-sm rounded px-3 py-2 font-courier outline-none focus:border-accent resize-none transition-colors"/>
-      ) : (
-        <input value={form[field] || ''} onChange={e => setForm(f => ({...f,[field]:e.target.value}))}
-          placeholder={ph} className="w-full bg-surface2 border border-border2 text-text text-sm rounded px-3 py-2 font-courier outline-none focus:border-accent transition-colors"/>
-      )}
-    </div>
-  )
+  const save=()=>{ if(!form.name?.trim())return
+    const chars=editing==='new'?[...project.characters,{id:uuid(),...form}]:project.characters.map(c=>c.id===editing?{...c,...form}:c)
+    updateProject({characters:chars}); setEditing(null) }
+  const del=(id)=>{ if(!confirm('Delete?'))return; updateProject({characters:project.characters.filter(c=>c.id!==id)}) }
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <p className="text-sm text-muted font-sans">{project.characters.length} character{project.characters.length !== 1 ? 's' : ''}</p>
-        <button onClick={openNew} className="px-4 py-1.5 bg-accent text-black text-sm font-sans font-medium rounded hover:opacity-85 transition-opacity">+ Add Character</button>
+      <div className="flex items-center justify-between mb-5">
+        <p className="text-sm text-[#555]">{project.characters.length} character{project.characters.length!==1?'s':''}</p>
+        <button onClick={()=>{setForm({name:'',actor:'',description:'',notes:''});setEditing('new')}}
+          className="px-4 py-2 bg-[#c9a84c] text-black text-sm font-medium rounded hover:opacity-85">
+          + Add Character
+        </button>
       </div>
-
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {project.characters.map(c => (
-          <div key={c.id} className="bg-surface border border-border rounded-lg p-4">
+        {project.characters.map(c=>(
+          <div key={c.id} className="bg-[#141414] border border-[#2a2a2a] rounded-lg p-4">
             <div className="flex items-start justify-between mb-2">
               <div>
-                <h3 className="font-courier font-bold uppercase text-text">{c.name}</h3>
-                {c.actor && <p className="text-xs text-muted font-sans mt-0.5">Played by {c.actor}</p>}
+                <h3 className="font-courier font-bold uppercase text-[#d8d6cc]">{c.name}</h3>
+                {c.actor && <p className="text-xs text-[#555] mt-0.5">Played by {c.actor}</p>}
               </div>
               <div className="flex gap-2">
-                <button onClick={() => openEdit(c)} className="text-xs text-muted hover:text-accent font-sans transition-colors">Edit</button>
-                <button onClick={() => del(c.id)} className="text-xs text-muted hover:text-red font-sans transition-colors">Del</button>
+                <button onClick={()=>{setForm(c);setEditing(c.id)}} className="text-xs text-[#555] hover:text-[#c9a84c]">Edit</button>
+                <button onClick={()=>del(c.id)} className="text-xs text-[#555] hover:text-[#c85050]">Del</button>
               </div>
             </div>
-            {c.description && <p className="text-xs text-text-dim font-sans mt-2 line-clamp-3">{c.description}</p>}
+            {c.description && <p className="text-xs text-[#555] line-clamp-3">{c.description}</p>}
           </div>
         ))}
       </div>
-
       {editing && (
-        <div className="modal-bg" onClick={() => setEditing(null)}>
-          <div className="bg-surface border border-border2 rounded-xl p-6 w-full max-w-lg fade-up flex flex-col gap-4" onClick={e => e.stopPropagation()}>
-            <h3 className="font-bebas text-2xl text-accent tracking-widest">{editing === 'new' ? 'New Character' : 'Edit Character'}</h3>
-            <F label="Name *"      field="name"        ph="KHALID"/>
-            <F label="Actor"       field="actor"       ph="Cast member name"/>
-            <F label="Description" field="description" ph="Physical description, backstory…" rows={3}/>
-            <F label="Notes"       field="notes"       ph="Costume, props, scheduling notes…" rows={2}/>
+        <div className="modal-bg" onClick={()=>setEditing(null)}>
+          <div className="bg-[#141414] border border-[#333] rounded-xl p-5 w-full max-w-lg fade-up flex flex-col gap-4 mx-4" onClick={e=>e.stopPropagation()}>
+            <h3 className="font-bebas text-2xl text-[#c9a84c] tracking-widest">{editing==='new'?'New Character':'Edit Character'}</h3>
+            {[{l:'Name *',f:'name',p:'KHALID'},{l:'Actor',f:'actor',p:'Cast member'},{l:'Description',f:'description',p:'Physical description…',rows:3},{l:'Notes',f:'notes',p:'Costume, props…',rows:2}].map(({l,f,p,rows})=>(
+              <div key={f}>
+                <label className="block text-xs text-[#555] uppercase tracking-widest mb-1.5">{l}</label>
+                {rows
+                  ? <textarea rows={rows} value={form[f]||''} onChange={e=>setForm(fm=>({...fm,[f]:e.target.value}))} placeholder={p} className="w-full bg-[#1c1c1c] border border-[#333] text-[#d8d6cc] text-sm rounded px-3 py-2 font-courier outline-none focus:border-[#c9a84c] resize-none"/>
+                  : <input value={form[f]||''} onChange={e=>setForm(fm=>({...fm,[f]:e.target.value}))} placeholder={p} className="w-full bg-[#1c1c1c] border border-[#333] text-[#d8d6cc] text-sm rounded px-3 py-2 font-courier outline-none focus:border-[#c9a84c]"/>
+                }
+              </div>
+            ))}
             <div className="flex gap-2 justify-end">
-              <button onClick={() => setEditing(null)} className="px-4 py-2 text-sm text-muted font-sans">Cancel</button>
-              <button onClick={save} className="px-5 py-2 bg-accent text-black text-sm font-sans font-medium rounded hover:opacity-85">Save</button>
+              <button onClick={()=>setEditing(null)} className="px-4 py-2 text-sm text-[#555]">Cancel</button>
+              <button onClick={save} className="px-5 py-2 bg-[#c9a84c] text-black text-sm font-medium rounded">Save</button>
             </div>
           </div>
         </div>
@@ -345,86 +376,67 @@ function CharactersTab({ project, updateProject }) {
   )
 }
 
-/* ─── Locations tab ─── */
+/* ─── Locations ─── */
 function LocationsTab({ project, updateProject }) {
-  const [editing, setEditing] = useState(null)
-  const [form,    setForm]    = useState({})
+  const [editing,setEditing]=useState(null)
+  const [form,setForm]=useState({})
 
-  const openNew  = () => { setForm({ name:'', address:'', contact:'', phone:'', permitRequired:false, notes:'' }); setEditing('new') }
-  const openEdit = (l) => { setForm(l); setEditing(l.id) }
-
-  const save = () => {
-    if (!form.name?.trim()) return
-    const locs = editing === 'new'
-      ? [...project.locations, { id: uuid(), ...form }]
-      : project.locations.map(l => l.id === editing ? { ...l, ...form } : l)
-    updateProject({ locations: locs })
-    setEditing(null)
-  }
-
-  const del = (id) => {
-    if (!confirm('Delete this location?')) return
-    updateProject({ locations: project.locations.filter(l => l.id !== id) })
-  }
+  const save=()=>{ if(!form.name?.trim())return
+    const locs=editing==='new'?[...project.locations,{id:uuid(),...form}]:project.locations.map(l=>l.id===editing?{...l,...form}:l)
+    updateProject({locations:locs}); setEditing(null) }
+  const del=(id)=>{ if(!confirm('Delete?'))return; updateProject({locations:project.locations.filter(l=>l.id!==id)}) }
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <p className="text-sm text-muted font-sans">{project.locations.length} location{project.locations.length !== 1 ? 's' : ''}</p>
-        <button onClick={openNew} className="px-4 py-1.5 bg-accent text-black text-sm font-sans font-medium rounded hover:opacity-85 transition-opacity">+ Add Location</button>
+      <div className="flex items-center justify-between mb-5">
+        <p className="text-sm text-[#555]">{project.locations.length} location{project.locations.length!==1?'s':''}</p>
+        <button onClick={()=>{setForm({name:'',address:'',contact:'',phone:'',permitRequired:false,notes:''});setEditing('new')}}
+          className="px-4 py-2 bg-[#c9a84c] text-black text-sm font-medium rounded hover:opacity-85">
+          + Add Location
+        </button>
       </div>
-
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {project.locations.map(l => (
-          <div key={l.id} className="bg-surface border border-border rounded-lg p-4">
+        {project.locations.map(l=>(
+          <div key={l.id} className="bg-[#141414] border border-[#2a2a2a] rounded-lg p-4">
             <div className="flex items-start justify-between mb-2">
               <div>
-                <h3 className="font-courier font-bold uppercase text-text text-sm">{l.name}</h3>
-                {l.address && <p className="text-xs text-muted font-sans mt-0.5">{l.address}</p>}
+                <h3 className="font-courier font-bold uppercase text-[#d8d6cc] text-sm">{l.name}</h3>
+                {l.address && <p className="text-xs text-[#555]">{l.address}</p>}
               </div>
-              <div className="flex items-center gap-3">
-                {l.permitRequired && (
-                  <span className="text-[10px] bg-amber/20 text-amber border border-amber/30 px-2 py-0.5 rounded font-sans">PERMIT</span>
-                )}
-                <button onClick={() => openEdit(l)} className="text-xs text-muted hover:text-accent font-sans">Edit</button>
-                <button onClick={() => del(l.id)} className="text-xs text-muted hover:text-red font-sans">Del</button>
+              <div className="flex items-center gap-2">
+                {l.permitRequired && <span className="text-[10px] bg-amber-900/30 text-amber-400 border border-amber-800/50 px-2 py-0.5 rounded">PERMIT</span>}
+                <button onClick={()=>{setForm(l);setEditing(l.id)}} className="text-xs text-[#555] hover:text-[#c9a84c]">Edit</button>
+                <button onClick={()=>del(l.id)} className="text-xs text-[#555] hover:text-[#c85050]">Del</button>
               </div>
             </div>
-            {l.contact && <p className="text-xs text-text-dim font-sans">Contact: {l.contact} {l.phone && `· ${l.phone}`}</p>}
-            {l.notes && <p className="text-xs text-muted font-sans mt-2 line-clamp-2">{l.notes}</p>}
+            {l.contact && <p className="text-xs text-[#555]">{l.contact}{l.phone&&` · ${l.phone}`}</p>}
+            {l.notes && <p className="text-xs text-[#555] mt-1 line-clamp-2">{l.notes}</p>}
           </div>
         ))}
       </div>
-
       {editing && (
-        <div className="modal-bg" onClick={() => setEditing(null)}>
-          <div className="bg-surface border border-border2 rounded-xl p-6 w-full max-w-lg fade-up flex flex-col gap-4" onClick={e => e.stopPropagation()}>
-            <h3 className="font-bebas text-2xl text-accent tracking-widest">{editing === 'new' ? 'New Location' : 'Edit Location'}</h3>
-            {[
-              { label:'Name *',   field:'name',    ph:'INT. POLICE STATION' },
-              { label:'Address',  field:'address', ph:'Street, City' },
-              { label:'Contact',  field:'contact', ph:'Location manager name' },
-              { label:'Phone',    field:'phone',   ph:'+92 300 0000000' },
-            ].map(f => (
-              <div key={f.field}>
-                <label className="block text-xs text-muted uppercase tracking-widest mb-1.5 font-sans">{f.label}</label>
-                <input value={form[f.field] || ''} onChange={e => setForm(fm => ({...fm,[f.field]:e.target.value}))}
-                  placeholder={f.ph} className="w-full bg-surface2 border border-border2 text-text text-sm rounded px-3 py-2 font-courier outline-none focus:border-accent transition-colors"/>
+        <div className="modal-bg" onClick={()=>setEditing(null)}>
+          <div className="bg-[#141414] border border-[#333] rounded-xl p-5 w-full max-w-lg fade-up flex flex-col gap-4 mx-4" onClick={e=>e.stopPropagation()}>
+            <h3 className="font-bebas text-2xl text-[#c9a84c] tracking-widest">{editing==='new'?'New Location':'Edit Location'}</h3>
+            {[{l:'Name *',f:'name',p:'INT. POLICE STATION'},{l:'Address',f:'address',p:'Street, City'},{l:'Contact',f:'contact',p:'Location manager'},{l:'Phone',f:'phone',p:'+92 300 0000000'}].map(({l,f,p})=>(
+              <div key={f}>
+                <label className="block text-xs text-[#555] uppercase tracking-widest mb-1.5">{l}</label>
+                <input value={form[f]||''} onChange={e=>setForm(fm=>({...fm,[f]:e.target.value}))} placeholder={p}
+                  className="w-full bg-[#1c1c1c] border border-[#333] text-[#d8d6cc] text-sm rounded px-3 py-2 font-courier outline-none focus:border-[#c9a84c]"/>
               </div>
             ))}
             <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={!!form.permitRequired} onChange={e => setForm(f => ({...f,permitRequired:e.target.checked}))} className="accent-yellow-500"/>
-              <span className="text-sm text-text font-sans">Permit required</span>
+              <input type="checkbox" checked={!!form.permitRequired} onChange={e=>setForm(f=>({...f,permitRequired:e.target.checked}))} className="accent-yellow-500 w-4 h-4"/>
+              <span className="text-sm text-[#d8d6cc]">Permit required</span>
             </label>
             <div>
-              <label className="block text-xs text-muted uppercase tracking-widest mb-1.5 font-sans">Notes</label>
-              <textarea rows={2} value={form.notes || ''} onChange={e => setForm(f => ({...f,notes:e.target.value}))}
-                placeholder="Parking, access, restrictions…"
-                className="w-full bg-surface2 border border-border2 text-text text-sm rounded px-3 py-2 font-courier outline-none focus:border-accent resize-none transition-colors"/>
+              <label className="block text-xs text-[#555] uppercase tracking-widest mb-1.5">Notes</label>
+              <textarea rows={2} value={form.notes||''} onChange={e=>setForm(f=>({...f,notes:e.target.value}))} placeholder="Parking, access, restrictions…"
+                className="w-full bg-[#1c1c1c] border border-[#333] text-[#d8d6cc] text-sm rounded px-3 py-2 font-courier outline-none focus:border-[#c9a84c] resize-none"/>
             </div>
             <div className="flex gap-2 justify-end">
-              <button onClick={() => setEditing(null)} className="px-4 py-2 text-sm text-muted font-sans">Cancel</button>
-              <button onClick={save} className="px-5 py-2 bg-accent text-black text-sm font-sans font-medium rounded hover:opacity-85">Save</button>
+              <button onClick={()=>setEditing(null)} className="px-4 py-2 text-sm text-[#555]">Cancel</button>
+              <button onClick={save} className="px-5 py-2 bg-[#c9a84c] text-black text-sm font-medium rounded">Save</button>
             </div>
           </div>
         </div>
@@ -433,60 +445,41 @@ function LocationsTab({ project, updateProject }) {
   )
 }
 
-/* ─── Mood Board tab ─── */
+/* ─── Mood Board ─── */
 function MoodBoardTab({ project, updateProject }) {
   const addImage = (e) => {
-    const files = Array.from(e.target.files || [])
-    files.forEach(file => {
+    Array.from(e.target.files||[]).forEach(file=>{
       const reader = new FileReader()
-      reader.onload = () => {
-        const img = { id: uuid(), data: reader.result, caption: '' }
-        updateProject({ moodboard: [...(project.moodboard || []), img] })
-      }
+      reader.onload = ()=>updateProject({moodboard:[...(project.moodboard||[]),{id:uuid(),data:reader.result,caption:''}]})
       reader.readAsDataURL(file)
     })
   }
-
-  const updateCaption = (id, caption) => {
-    updateProject({ moodboard: project.moodboard.map(m => m.id === id ? { ...m, caption } : m) })
-  }
-
-  const del = (id) => {
-    updateProject({ moodboard: project.moodboard.filter(m => m.id !== id) })
-  }
+  const del = (id) => updateProject({moodboard:project.moodboard.filter(m=>m.id!==id)})
+  const cap = (id,caption) => updateProject({moodboard:project.moodboard.map(m=>m.id===id?{...m,caption}:m)})
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <p className="text-sm text-muted font-sans">{(project.moodboard||[]).length} images</p>
-        <label className="px-4 py-1.5 bg-accent text-black text-sm font-sans font-medium rounded hover:opacity-85 transition-opacity cursor-pointer">
-          + Upload Images
-          <input type="file" accept="image/*" multiple className="hidden" onChange={addImage}/>
+      <div className="flex items-center justify-between mb-5">
+        <p className="text-sm text-[#555]">{(project.moodboard||[]).length} images</p>
+        <label className="px-4 py-2 bg-[#c9a84c] text-black text-sm font-medium rounded hover:opacity-85 cursor-pointer">
+          + Upload <input type="file" accept="image/*" multiple className="hidden" onChange={addImage}/>
         </label>
       </div>
-
-      {(project.moodboard||[]).length === 0 ? (
-        <div className="text-center py-24">
-          <label className="cursor-pointer flex flex-col items-center gap-3">
-            <div className="text-5xl">🖼</div>
-            <p className="text-sm font-sans text-muted">Upload reference images for your mood board</p>
-            <input type="file" accept="image/*" multiple className="hidden" onChange={addImage}/>
-          </label>
-        </div>
+      {(project.moodboard||[]).length===0 ? (
+        <label className="flex flex-col items-center py-20 cursor-pointer">
+          <div className="text-5xl mb-3">🖼</div>
+          <p className="text-sm text-[#555]">Upload reference images</p>
+          <input type="file" accept="image/*" multiple className="hidden" onChange={addImage}/>
+        </label>
       ) : (
         <div className="columns-2 sm:columns-3 md:columns-4 gap-3">
-          {(project.moodboard||[]).map(m => (
+          {(project.moodboard||[]).map(m=>(
             <div key={m.id} className="break-inside-avoid mb-3 group relative">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={m.data} alt={m.caption} className="w-full rounded border border-border object-cover"/>
+              <img src={m.data} alt={m.caption} className="w-full rounded border border-[#2a2a2a] object-cover"/>
               <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded flex flex-col justify-end p-2">
-                <input
-                  value={m.caption}
-                  onChange={e => updateCaption(m.id, e.target.value)}
-                  placeholder="Caption…"
-                  className="bg-transparent text-white text-xs font-sans border-b border-white/30 outline-none placeholder-white/40 w-full"
-                />
-                <button onClick={() => del(m.id)} className="absolute top-2 right-2 text-white/70 hover:text-red text-sm">✕</button>
+                <input value={m.caption} onChange={e=>cap(m.id,e.target.value)} placeholder="Caption…"
+                  className="bg-transparent text-white text-xs border-b border-white/30 outline-none placeholder-white/40 w-full"/>
+                <button onClick={()=>del(m.id)} className="absolute top-2 right-2 text-white/70 hover:text-[#c85050]">✕</button>
               </div>
             </div>
           ))}
@@ -496,252 +489,205 @@ function MoodBoardTab({ project, updateProject }) {
   )
 }
 
-/* ─── Call Sheet tab ─── */
-function CallSheetTab({ project, updateProject }) {
-  const cs = project.callsheet || { shootDates: [], crew: [], notes: '' }
+/* ─── Call Sheet ─── */
+function CallSheetTab({ project, updateProject, onPrint }) {
+  const cs = project.callsheet || { shootDates:[], crew:[], notes:'' }
+  const upCS = (patch) => updateProject({ callsheet:{...cs,...patch} })
 
-  const addDate = () => {
-    const d = { id: uuid(), date: '', location: '', callTime: '06:00', scenes: '', notes: '' }
-    updateProject({ callsheet: { ...cs, shootDates: [...cs.shootDates, d] } })
-  }
+  const addDate = () => upCS({shootDates:[...cs.shootDates,{id:uuid(),date:'',location:'',callTime:'06:00',scenes:'',notes:''}]})
+  const upDate  = (id,f,v) => upCS({shootDates:cs.shootDates.map(d=>d.id===id?{...d,[f]:v}:d)})
+  const delDate = (id) => upCS({shootDates:cs.shootDates.filter(d=>d.id!==id)})
+  const addCrew = () => upCS({crew:[...cs.crew,{id:uuid(),name:'',role:'',phone:'',callTime:''}]})
+  const upCrew  = (id,f,v) => upCS({crew:cs.crew.map(c=>c.id===id?{...c,[f]:v}:c)})
+  const delCrew = (id) => upCS({crew:cs.crew.filter(c=>c.id!==id)})
 
-  const updateDate = (id, field, val) => {
-    const shootDates = cs.shootDates.map(d => d.id === id ? { ...d, [field]: val } : d)
-    updateProject({ callsheet: { ...cs, shootDates } })
-  }
-
-  const deleteDate = (id) => {
-    updateProject({ callsheet: { ...cs, shootDates: cs.shootDates.filter(d => d.id !== id) } })
-  }
-
-  const addCrew = () => {
-    const c = { id: uuid(), name: '', role: '', phone: '', callTime: '' }
-    updateProject({ callsheet: { ...cs, crew: [...cs.crew, c] } })
-  }
-
-  const updateCrew = (id, field, val) => {
-    const crew = cs.crew.map(c => c.id === id ? { ...c, [field]: val } : c)
-    updateProject({ callsheet: { ...cs, crew } })
-  }
-
-  const deleteCrew = (id) => {
-    updateProject({ callsheet: { ...cs, crew: cs.crew.filter(c => c.id !== id) } })
-  }
-
-  const inp = 'bg-surface2 border border-border2 text-text text-xs rounded px-2 py-1.5 font-sans outline-none focus:border-accent transition-colors w-full'
+  const inp = 'bg-[#1c1c1c] border border-[#333] text-[#d8d6cc] text-xs rounded px-2 py-1.5 outline-none focus:border-[#c9a84c] w-full'
 
   return (
     <div className="flex flex-col gap-8">
-      {/* Shoot dates */}
       <div>
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-medium text-text font-sans">Shoot Dates</h3>
-          <button onClick={addDate} className="px-3 py-1 text-xs font-sans border border-border2 text-muted rounded hover:text-text hover:border-accent transition-all">+ Add Date</button>
+          <div className="flex items-center gap-3">
+            <h3 className="text-sm font-medium text-[#d8d6cc]">Shoot Dates</h3>
+            <button onClick={onPrint} className="px-3 py-1 text-xs border border-[#333] text-[#555] rounded hover:text-[#d8d6cc] hover:border-[#c9a84c]">
+              🖨 Print Call Sheet
+            </button>
+          </div>
+          <button onClick={addDate} className="px-3 py-1.5 text-xs border border-[#333] text-[#555] rounded hover:text-[#d8d6cc] hover:border-[#c9a84c]">+ Add Date</button>
         </div>
         <div className="flex flex-col gap-3">
-          {cs.shootDates.map(d => (
-            <div key={d.id} className="bg-surface border border-border rounded-lg p-4 grid grid-cols-2 md:grid-cols-5 gap-3 items-start">
-              {[
-                { label:'Date',      field:'date',      type:'date' },
-                { label:'Call Time', field:'callTime',  type:'time' },
-                { label:'Location',  field:'location',  type:'text', ph:'INT. POLICE STATION' },
-                { label:'Scenes',    field:'scenes',    type:'text', ph:'1A, 2B, 4' },
-                { label:'Notes',     field:'notes',     type:'text', ph:'Special notes…' },
-              ].map(f => (
-                <div key={f.field}>
-                  <label className="block text-[10px] text-muted uppercase tracking-widest mb-1 font-sans">{f.label}</label>
-                  <input type={f.type} value={d[f.field]||''} placeholder={f.ph}
-                    onChange={e => updateDate(d.id, f.field, e.target.value)} className={inp}/>
+          {cs.shootDates.map(d=>(
+            <div key={d.id} className="bg-[#141414] border border-[#2a2a2a] rounded-lg p-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
+              {[{l:'Date',f:'date',t:'date'},{l:'Call Time',f:'callTime',t:'time'},{l:'Location',f:'location',t:'text',p:'Scene location'},{l:'Scenes',f:'scenes',t:'text',p:'1A, 2B'},{l:'Notes',f:'notes',t:'text',p:'Notes…'}].map(({l,f,t,p})=>(
+                <div key={f}>
+                  <label className="block text-[10px] text-[#555] uppercase tracking-widest mb-1">{l}</label>
+                  <input type={t} value={d[f]||''} placeholder={p} onChange={e=>upDate(d.id,f,e.target.value)} className={inp}/>
                 </div>
               ))}
-              <button onClick={() => deleteDate(d.id)} className="text-xs text-muted hover:text-red font-sans self-end pb-1.5">Delete</button>
+              <button onClick={()=>delDate(d.id)} className="text-xs text-[#555] hover:text-[#c85050] self-end pb-1.5 col-span-2 sm:col-span-1 text-left sm:text-center">Delete</button>
             </div>
           ))}
-          {cs.shootDates.length === 0 && <p className="text-sm text-muted font-sans">No shoot dates scheduled.</p>}
+          {cs.shootDates.length===0 && <p className="text-sm text-[#555]">No shoot dates scheduled.</p>}
         </div>
       </div>
 
-      {/* Crew */}
       <div>
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-medium text-text font-sans">Crew</h3>
-          <button onClick={addCrew} className="px-3 py-1 text-xs font-sans border border-border2 text-muted rounded hover:text-text hover:border-accent transition-all">+ Add Crew Member</button>
+          <h3 className="text-sm font-medium text-[#d8d6cc]">Crew</h3>
+          <button onClick={addCrew} className="px-3 py-1.5 text-xs border border-[#333] text-[#555] rounded hover:text-[#d8d6cc] hover:border-[#c9a84c]">+ Add Crew</button>
         </div>
-        <div className="border border-border rounded-lg overflow-hidden">
-          <table className="w-full text-xs font-sans">
-            <thead>
-              <tr className="bg-surface2 border-b border-border">
-                {['Name','Role','Phone','Call Time',''].map((h,i) => (
-                  <th key={i} className="text-left px-3 py-2 text-[10px] text-muted uppercase tracking-wider">{h}</th>
-                ))}
-              </tr>
-            </thead>
+        <div className="border border-[#2a2a2a] rounded-lg overflow-x-auto">
+          <table className="w-full text-xs min-w-[500px]">
+            <thead><tr className="bg-[#1c1c1c] border-b border-[#2a2a2a]">
+              {['Name','Role','Phone','Call Time',''].map((h,i)=><th key={i} className="text-left px-3 py-2 text-[10px] text-[#555] uppercase tracking-wider">{h}</th>)}
+            </tr></thead>
             <tbody>
-              {cs.crew.length === 0 ? (
-                <tr><td colSpan={5} className="px-3 py-6 text-center text-muted">No crew added yet.</td></tr>
-              ) : (
-                cs.crew.map((c,i) => (
-                  <tr key={c.id} className={`border-b border-border ${i%2===0?'bg-bg':'bg-surface'}`}>
-                    {[
-                      { field:'name',     ph:'Crew Name' },
-                      { field:'role',     ph:'Director, DP, etc.' },
-                      { field:'phone',    ph:'+92…' },
-                      { field:'callTime', ph:'07:00', type:'time' },
-                    ].map(f => (
-                      <td key={f.field} className="px-2 py-1.5">
-                        <input type={f.type||'text'} value={c[f.field]||''} placeholder={f.ph}
-                          onChange={e => updateCrew(c.id, f.field, e.target.value)} className={inp}/>
+              {cs.crew.length===0
+                ? <tr><td colSpan={5} className="px-3 py-6 text-center text-[#555]">No crew added yet.</td></tr>
+                : cs.crew.map((c,i)=>(
+                  <tr key={c.id} className={`border-b border-[#2a2a2a] ${i%2===0?'bg-[#0a0a0a]':'bg-[#141414]'}`}>
+                    {[{f:'name',p:'Name'},{f:'role',p:'Director, DP…'},{f:'phone',p:'+92…'},{f:'callTime',p:'07:00',t:'time'}].map(({f,p,t})=>(
+                      <td key={f} className="px-2 py-1.5">
+                        <input type={t||'text'} value={c[f]||''} placeholder={p} onChange={e=>upCrew(c.id,f,e.target.value)} className={inp}/>
                       </td>
                     ))}
-                    <td className="px-2 py-1.5">
-                      <button onClick={() => deleteCrew(c.id)} className="text-muted hover:text-red transition-colors">✕</button>
-                    </td>
+                    <td className="px-2 py-1.5"><button onClick={()=>delCrew(c.id)} className="text-[#555] hover:text-[#c85050]">✕</button></td>
                   </tr>
                 ))
-              )}
+              }
             </tbody>
           </table>
         </div>
       </div>
 
-      {/* General notes */}
       <div>
-        <label className="block text-xs text-muted uppercase tracking-widest mb-2 font-sans">Production Notes</label>
-        <textarea
-          rows={4}
-          value={cs.notes || ''}
-          onChange={e => updateProject({ callsheet: { ...cs, notes: e.target.value } })}
-          placeholder="General production notes, safety briefings, equipment lists…"
-          className="w-full bg-surface2 border border-border2 text-text text-sm rounded px-3 py-2 font-courier outline-none focus:border-accent resize-none transition-colors"
-        />
+        <label className="block text-xs text-[#555] uppercase tracking-widest mb-2">Production Notes</label>
+        <textarea rows={4} value={cs.notes||''} onChange={e=>upCS({notes:e.target.value})}
+          placeholder="General notes, safety briefings, equipment lists…"
+          className="w-full bg-[#1c1c1c] border border-[#333] text-[#d8d6cc] text-sm rounded px-3 py-2 font-courier outline-none focus:border-[#c9a84c] resize-none"/>
       </div>
     </div>
   )
 }
 
-/* ══════════════════════════════════════
-   MAIN PROJECT PAGE
-══════════════════════════════════════ */
+/* ══════════════════════════════
+   MAIN PAGE
+══════════════════════════════ */
 const TABS = [
-  { id: 'storyboard', label: '🎬 Storyboard' },
-  { id: 'shotlist',   label: '📋 Shot List' },
-  { id: 'characters', label: '👥 Characters' },
-  { id: 'locations',  label: '📍 Locations' },
-  { id: 'moodboard',  label: '🖼 Mood Board' },
-  { id: 'callsheet',  label: '📅 Call Sheet' },
+  {id:'storyboard',label:'🎬',full:'Storyboard'},
+  {id:'shotlist',  label:'📋',full:'Shot List'},
+  {id:'characters',label:'👥',full:'Characters'},
+  {id:'locations', label:'📍',full:'Locations'},
+  {id:'moodboard', label:'🖼', full:'Mood Board'},
+  {id:'callsheet', label:'📅',full:'Call Sheet'},
 ]
 
 export default function ProjectPage() {
-  const { id }  = useParams()
-  const router  = useRouter()
-  const [project, setProject] = useState(null)
-  const [tab,     setTab]     = useState('storyboard')
+  const { id } = useParams()
+  const router = useRouter()
+  const [project,      setProject]      = useState(null)
+  const [tab,          setTab]          = useState('storyboard')
   const [editingTitle, setEditingTitle] = useState(false)
-  const [titleVal, setTitleVal] = useState('')
+  const [titleVal,     setTitleVal]     = useState('')
+  const [showExport,   setShowExport]   = useState(false)
 
-  /* Load project */
-  useEffect(() => {
-    const projects = loadProjects()
-    const found    = projects.find(p => p.id === id)
-    if (!found) { router.push('/'); return }
-    setProject(found)
-    setTitleVal(found.title)
-  }, [id, router])
+  useEffect(()=>{
+    const p = loadProjects().find(p=>p.id===id)
+    if(!p){router.push('/');return}
+    setProject(p); setTitleVal(p.title)
+  },[id,router])
 
-  /* Save project on change */
-  const updateProject = useCallback((patch) => {
-    setProject(prev => {
-      if (!prev) return prev
-      const updated = { ...prev, ...patch, updatedAt: Date.now() }
-      const projects = loadProjects()
-      saveProjects(projects.map(p => p.id === updated.id ? updated : p))
+  const updateProject = useCallback((patch)=>{
+    setProject(prev=>{
+      if(!prev) return prev
+      const updated = {...prev,...patch,updatedAt:Date.now()}
+      saveProjects(loadProjects().map(p=>p.id===updated.id?updated:p))
       return updated
     })
-  }, [])
+  },[])
 
-  const saveTitle = () => {
-    if (titleVal.trim()) updateProject({ title: titleVal.trim() })
-    setEditingTitle(false)
-  }
+  const saveTitle = () => { if(titleVal.trim()) updateProject({title:titleVal.trim()}); setEditingTitle(false) }
 
-  if (!project) return (
-    <div className="min-h-screen bg-bg flex items-center justify-center">
-      <div className="text-muted font-sans text-sm">Loading…</div>
-    </div>
-  )
+  if(!project) return <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center"><div className="text-[#555] text-sm">Loading…</div></div>
 
   return (
-    <div className="min-h-screen bg-bg flex flex-col">
+    <div className="min-h-screen bg-[#0a0a0a] flex flex-col">
       {/* Top nav */}
-      <header className="border-b border-border bg-surface sticky top-0 z-50">
-        <div className="max-w-screen-xl mx-auto px-6 h-13 py-2 flex items-center gap-4">
-          <button onClick={() => router.push('/')} className="text-muted hover:text-text font-sans text-sm transition-colors flex items-center gap-1">
-            ← Back
+      <header className="border-b border-[#2a2a2a] bg-[#141414] sticky top-0 z-50">
+        <div className="max-w-screen-xl mx-auto px-4 sm:px-6 h-13 py-2.5 flex items-center gap-3">
+          <button onClick={()=>router.push('/')} className="text-[#555] hover:text-[#d8d6cc] text-sm transition-colors flex items-center gap-1 flex-shrink-0">
+            ←<span className="hidden sm:inline"> Back</span>
           </button>
+          <div className="w-px h-4 bg-[#2a2a2a] hidden sm:block"/>
+          <span className="font-bebas text-lg sm:text-xl text-[#c9a84c] tracking-widest hidden sm:inline flex-shrink-0">OpenFrame</span>
 
-          <div className="w-px h-4 bg-border"/>
-
-          <div className="flex items-center gap-2">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c9a84c" strokeWidth="1.5">
-              <rect x="2" y="3" width="20" height="18" rx="2"/>
-              <line x1="2" y1="8" x2="22" y2="8"/>
-              <circle cx="6" cy="5.5" r="1" fill="#c9a84c" stroke="none"/>
-              <circle cx="10" cy="5.5" r="1" fill="#c9a84c" stroke="none"/>
-            </svg>
-            <span className="font-bebas text-xl text-accent tracking-widest">OpenFrame</span>
-          </div>
-
-          <div className="flex-1 flex justify-center">
+          <div className="flex-1 flex justify-center min-w-0">
             {editingTitle ? (
-              <input
-                autoFocus
-                value={titleVal}
-                onChange={e => setTitleVal(e.target.value)}
-                onBlur={saveTitle}
-                onKeyDown={e => { if(e.key==='Enter') saveTitle(); if(e.key==='Escape') setEditingTitle(false) }}
-                className="text-center bg-surface2 border border-accent rounded px-3 py-1 font-bebas text-xl tracking-widest text-text outline-none"
-              />
+              <input autoFocus value={titleVal} onChange={e=>setTitleVal(e.target.value)}
+                onBlur={saveTitle} onKeyDown={e=>{if(e.key==='Enter')saveTitle();if(e.key==='Escape')setEditingTitle(false)}}
+                className="text-center bg-[#1c1c1c] border border-[#c9a84c] rounded px-3 py-1 font-bebas text-lg tracking-widest text-[#d8d6cc] outline-none w-full max-w-xs"/>
             ) : (
-              <button onClick={() => setEditingTitle(true)} className="font-bebas text-xl tracking-widest text-text hover:text-accent transition-colors">
+              <button onClick={()=>setEditingTitle(true)} className="font-bebas text-lg sm:text-xl tracking-widest text-[#d8d6cc] hover:text-[#c9a84c] transition-colors truncate max-w-[200px] sm:max-w-xs">
                 {project.title}
               </button>
             )}
           </div>
 
-          <span className="text-xs text-muted font-sans">
-            Saved {new Date(project.updatedAt).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })}
-          </span>
+          {/* Export menu */}
+          <div className="relative flex-shrink-0">
+            <button onClick={()=>setShowExport(!showExport)}
+              className="flex items-center gap-1.5 px-3 py-1.5 border border-[#333] text-[#555] text-xs rounded hover:text-[#d8d6cc] hover:border-[#c9a84c] transition-all">
+              ↓ Export
+            </button>
+            {showExport && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={()=>setShowExport(false)}/>
+                <div className="absolute right-0 top-9 bg-[#141414] border border-[#333] rounded-lg overflow-hidden z-50 w-52 shadow-xl fade-up">
+                  {[
+                    {label:'📄 PDF — Storyboard',  action:()=>{printMode('print-storyboard','Storyboard',project);setShowExport(false)}},
+                    {label:'📋 PDF — Shot List',    action:()=>{printMode('print-shotlist','Shot List',project);setShowExport(false)}},
+                    {label:'📅 PDF — Call Sheet',   action:()=>{printMode('print-callsheet','Call Sheet',project);setShowExport(false)}},
+                    {label:'💾 JSON Backup',        action:()=>{exportJSON(project);setShowExport(false)}},
+                  ].map(({label,action})=>(
+                    <button key={label} onClick={action}
+                      className="w-full text-left px-4 py-3 text-sm text-[#d8d6cc] hover:bg-[#1c1c1c] hover:text-[#c9a84c] transition-colors border-b border-[#2a2a2a] last:border-0">
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </header>
 
-      {/* Tab bar */}
-      <div className="border-b border-border bg-surface sticky top-[52px] z-40">
-        <div className="max-w-screen-xl mx-auto px-6 flex overflow-x-auto scrollbar-hide">
-          {TABS.map(t => (
-            <button
-              key={t.id}
-              onClick={() => setTab(t.id)}
-              className={`px-5 py-3 text-sm font-sans whitespace-nowrap border-b-2 transition-all flex-shrink-0 ${
-                tab === t.id
-                  ? 'border-accent text-accent'
-                  : 'border-transparent text-muted hover:text-text'
-              }`}
-            >
-              {t.label}
+      {/* Tab bar — scrollable on mobile */}
+      <div className="border-b border-[#2a2a2a] bg-[#141414] sticky top-[52px] z-40 overflow-x-auto">
+        <div className="flex min-w-max sm:min-w-0 px-2 sm:px-6 sm:justify-start">
+          {TABS.map(t=>(
+            <button key={t.id} onClick={()=>setTab(t.id)}
+              className={`px-4 sm:px-5 py-3 text-sm whitespace-nowrap border-b-2 transition-all flex-shrink-0 flex items-center gap-1.5 ${
+                tab===t.id ? 'border-[#c9a84c] text-[#c9a84c]' : 'border-transparent text-[#555] hover:text-[#d8d6cc]'
+              }`}>
+              <span>{t.label}</span>
+              <span className="hidden sm:inline">{t.full}</span>
             </button>
           ))}
         </div>
       </div>
 
       {/* Content */}
-      <main className="flex-1 max-w-screen-xl mx-auto w-full px-6 py-8">
-        {tab === 'storyboard' && <StoryboardTab project={project} updateProject={updateProject}/>}
-        {tab === 'shotlist'   && <ShotListTab   project={project}/>}
-        {tab === 'characters' && <CharactersTab  project={project} updateProject={updateProject}/>}
-        {tab === 'locations'  && <LocationsTab   project={project} updateProject={updateProject}/>}
-        {tab === 'moodboard'  && <MoodBoardTab   project={project} updateProject={updateProject}/>}
-        {tab === 'callsheet'  && <CallSheetTab   project={project} updateProject={updateProject}/>}
+      <main className="flex-1 max-w-screen-xl mx-auto w-full px-4 sm:px-6 py-6 sm:py-8">
+        {tab==='storyboard' && <StoryboardTab project={project} updateProject={updateProject}/>}
+        {tab==='shotlist'   && <ShotListTab   project={project} onPrint={()=>printMode('print-shotlist','Shot List',project)}/>}
+        {tab==='characters' && <CharactersTab  project={project} updateProject={updateProject}/>}
+        {tab==='locations'  && <LocationsTab   project={project} updateProject={updateProject}/>}
+        {tab==='moodboard'  && <MoodBoardTab   project={project} updateProject={updateProject}/>}
+        {tab==='callsheet'  && <CallSheetTab   project={project} updateProject={updateProject} onPrint={()=>printMode('print-callsheet','Call Sheet',project)}/>}
       </main>
+
+      {/* Hidden print root */}
+      <div id="print-root" style={{display:'none'}}/>
     </div>
   )
 }
