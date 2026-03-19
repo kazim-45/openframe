@@ -14,7 +14,7 @@ OpenFrame is a complete pre-production tool for filmmakers. Storyboard your shot
 
 Part of the **[OpenSlate](https://github.com/kazim-45)** suite. Write your script in **[OpenWrite](https://openwrite.vercel.app)** — plan your shoot here.
 
-**[→ Open the app](https://openframe.vercel.app)**
+**[→ Open the app](https://openframev1.vercel.app)**
 
 ---
 
@@ -100,7 +100,7 @@ Full production scheduling:
 
 **Use it instantly:**
 ```
-https://openframe.vercel.app
+https://openframev1.vercel.app
 ```
 
 **Run locally:**
