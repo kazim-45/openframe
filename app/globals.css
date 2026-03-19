@@ -1,0 +1,76 @@
+@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Courier+Prime:ital,wght@0,400;0,700;1,400&family=Inter:wght@300;400;500;600&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --accent: #c9a84c;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  background: #0a0a0a;
+  color: #d8d6cc;
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: #7a6030; }
+
+/* Selection */
+::selection { background: rgba(201,168,76,.25); }
+
+/* Panel frame — film gate aesthetic */
+.panel-frame {
+  position: relative;
+  background: #111;
+  border: 1px solid #2a2a2a;
+  border-radius: 4px;
+  overflow: hidden;
+  aspect-ratio: 16/9;
+  cursor: pointer;
+  transition: border-color .15s, transform .1s;
+}
+.panel-frame:hover {
+  border-color: #c9a84c;
+  transform: translateY(-1px);
+}
+.panel-frame::before,
+.panel-frame::after {
+  content: '';
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 20px;
+  background: #0a0a0a;
+  z-index: 2;
+  pointer-events: none;
+}
+.panel-frame::before { left: 0; }
+.panel-frame::after  { right: 0; }
+
+/* Fade-in animation */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+.fade-up { animation: fadeUp .2s ease both; }
+
+/* Modal backdrop */
+.modal-bg {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.75);
+  backdrop-filter: blur(3px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Canvas cursor */
+.canvas-pencil { cursor: crosshair; }
+.canvas-eraser { cursor: cell; }
