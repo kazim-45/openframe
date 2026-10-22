@@ -156,7 +156,7 @@ openframe/
 |---|---|---|
 | **[OpenWrite](https://github.com/kazim-45/openwrite)** | Screenplay editor | ✅ Live |
 | **OpenFrame** | Pre-production suite | ✅ Live |
-| **OpenView** | Viewfinder and shot planning | 🔜 Coming |
+| **OpenView** | Viewfinder and shot planning | ✅ Live |
 
 The vision: write your script in OpenWrite, plan your shoot in OpenFrame, frame your shots in OpenView — connected, free, built for filmmakers who can't afford the existing tools.
 
